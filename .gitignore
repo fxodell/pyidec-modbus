@@ -1,0 +1,8 @@
+# Added by setup-cursor
+*.swo
+*.swp
+*~
+.DS_Store
+/scratch/
+docs/
+data/
