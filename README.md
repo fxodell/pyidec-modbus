@@ -75,34 +75,47 @@ Output is written to `src/pyidec_modbus/data/fc6a_tagmap.json`. The generator is
 
 ## CLI
 
-A production-ready CLI is available via the `pyidec` command:
+A production-ready CLI is available via the `pyidec` command with full environment variable support, multiple output formats (text, JSON, CSV), and comprehensive error handling.
+
+### Quick Start
 
 ```bash
 # Install with CLI support
 pip install -e ".[cli]"
 
+# Set environment variables for convenience (optional)
+export PYIDEC_HOST=192.168.1.10
+export PYIDEC_PORT=502
+
 # Test connectivity
-pyidec --host 192.168.1.10 ping
+pyidec ping
 
 # Read a tag
-pyidec --host 192.168.1.10 read D0007
+pyidec read D0007
 
 # Write a tag
-pyidec --host 192.168.1.10 write Q0001 true
+pyidec write Q0001 true
 
-# Batch read
-pyidec --host 192.168.1.10 read-many D0007 D0008 M0012
+# Batch read with partial results
+pyidec read-many D0007 D0008 M0012 --partial
 
-# Poll tags continuously
-pyidec --host 192.168.1.10 poll D0007 M0012 --interval 1.0 --format json
+# Poll tags continuously (text, json, or csv)
+pyidec poll D0007 M0012 --interval 1.0 --format json
 
-# Explain tag mapping
+# Explain tag mapping (no connection required)
 pyidec explain D0007
 ```
 
-See [examples/cli_examples.md](examples/cli_examples.md) for comprehensive CLI documentation.
+### Features
 
-**Environment variables**: Set `PYIDEC_HOST`, `PYIDEC_PORT`, etc. to avoid repeating connection params.
+- **7 commands**: `ping`, `info`, `read`, `write`, `explain`, `read-many`, `poll`
+- **Environment variables**: `PYIDEC_HOST`, `PYIDEC_PORT`, `PYIDEC_UNIT_ID`, `PYIDEC_TIMEOUT`, `PYIDEC_RETRIES`, `PYIDEC_PROFILE`
+- **Output formats**: Text (default), JSON, CSV (for poll)
+- **Signed integer support**: `--signed` flag for register interpretation
+- **Partial results**: `--partial` flag for batch reads with error handling
+- **Proper exit codes**: 0=success, 2=input error, 3=connection error, 4=unexpected error
+
+See [examples/cli_examples.md](examples/cli_examples.md) for comprehensive CLI documentation.
 
 ## Tests
 

@@ -40,6 +40,8 @@ def _parse_entry(raw: dict[str, Any]) -> TagDef:
     offset = int(raw["offset"])
     width = int(raw["width"])
     meta = raw.get("meta")
+    if meta is not None and not isinstance(meta, dict):
+        meta = None  # tolerate malformed JSON
     return TagDef(operand=operand, table=table, offset=offset, width=width, meta=meta)
 
 

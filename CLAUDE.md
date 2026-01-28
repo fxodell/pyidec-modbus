@@ -13,8 +13,14 @@ Production-ready Python package wrapping [pymodbus](https://github.com/pymodbus-
 # Standard install
 pip install -e .
 
+# With CLI support
+pip install -e ".[cli]"
+
 # Dev install (includes openpyxl for tagmap generation)
 pip install -e ".[dev]"
+
+# All extras
+pip install -e ".[cli,dev]"
 ```
 
 ### Testing
@@ -103,6 +109,60 @@ Key constraints:
 - No throwaway files in repo root (use `/scratch` if needed)
 - Add tests or provide manual test steps after logic changes
 
+## CLI Architecture
+
+The package includes a production-ready CLI (`cli.py`) built with Typer:
+
+### Commands (7 total)
+1. **ping** - Test connectivity (minimal Modbus read or specific tag)
+2. **info** - Show version/profile, optionally test connectivity
+3. **read** - Single tag read with --signed support
+4. **write** - Single tag write (bool/int parsing, --signed support)
+5. **explain** - Tag mapping info (NO CONNECTION REQUIRED - uses tagmap directly)
+6. **read-many** - Batch reads with --partial flag for error handling
+7. **poll** - Continuous monitoring with text/json/csv formats
+
+### CLI Design Patterns
+
+**Environment Variables**:
+- Typer's `envvar` parameter handles env vars automatically
+- Supported: `PYIDEC_HOST`, `PYIDEC_PORT`, `PYIDEC_UNIT_ID`, `PYIDEC_TIMEOUT`, `PYIDEC_RETRIES`, `PYIDEC_PROFILE`
+- CLI args override env vars
+
+**Exit Codes**:
+- 0: Success
+- 2: User input error (invalid tag/value)
+- 3: Connection/Modbus error
+- 4: Unexpected error
+
+**Output Formats**:
+- Text: Human-readable (default for most commands)
+- JSON: Machine-readable (--json flag)
+- CSV: For poll command (--format csv)
+
+**Optimizations**:
+- `explain` command: Uses tagmap directly, no client connection needed
+- `read-many --partial`: Validates tags first, then batch reads valid ones (preserves coalescing)
+- Poll: Reuses client connection across iterations
+
+**Value Parsing**:
+- Bool: true/false, 1/0, on/off, yes/no (case-insensitive)
+- Int: Decimal or hex (0x prefix), validated to 16-bit range
+- Signed: `--signed` flag converts to/from signed 16-bit
+
+**Error Handling**:
+- All commands have try/except with proper exit codes
+- `--verbose` flag enables debug logging and stack traces
+- Clear error messages to stderr
+
+### CLI Testing Guidelines
+
+- Use `typer.testing.CliRunner` for command tests
+- Mock `IDECModbusClient` for integration tests
+- Test value parsing functions directly (pure functions)
+- `explain` command doesn't need mocking (uses tagmap directly)
+- Test all exit codes and error paths
+
 ## Important Notes
 
 - **Runtime never touches Excel file**: tagmap is embedded JSON loaded via `importlib.resources`
@@ -110,3 +170,4 @@ Key constraints:
 - **Supported operands**: D (data register), M (internal relay), I (input), Q (output), T (timer .C/.CV/.PV), C (counter .C/.CV/.PV)
 - **Python 3.11+ required**: uses modern type hints and `importlib.resources.files()`
 - **Context manager recommended**: `with IDECModbusClient(...) as plc:` ensures connection cleanup
+- **CLI vs Library**: CLI is optional extra (`pip install ".[cli]"`), library has no CLI dependencies

@@ -3,8 +3,6 @@
 
 import json
 import logging
-import os
-import sys
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -14,7 +12,7 @@ from typing_extensions import Annotated
 
 from . import __version__  # type: ignore
 from .client import IDECModbusClient
-from .errors import InvalidTagError, ModbusIOError, PyIDECModbusError, UnknownTagError
+from .errors import InvalidTagError, ModbusIOError, UnknownTagError
 
 app = typer.Typer(
     name="pyidec",
@@ -23,37 +21,6 @@ app = typer.Typer(
 )
 
 logger = logging.getLogger(__name__)
-
-# ============================================================================
-# Environment variable defaults
-# ============================================================================
-
-def get_env(key: str, default: Any = None) -> Any:
-    """Get environment variable with PYIDEC_ prefix."""
-    return os.environ.get(f"PYIDEC_{key}", default)
-
-
-def get_env_int(key: str, default: int) -> int:
-    """Get integer environment variable."""
-    val = get_env(key)
-    if val is None:
-        return default
-    try:
-        return int(val)
-    except ValueError:
-        return default
-
-
-def get_env_float(key: str, default: float) -> float:
-    """Get float environment variable."""
-    val = get_env(key)
-    if val is None:
-        return default
-    try:
-        return float(val)
-    except ValueError:
-        return default
-
 
 # ============================================================================
 # Shared options and helpers
@@ -216,7 +183,9 @@ def ping(
                 typer.echo(f"OK: Connected to {host}:{port}, read {tag} = {value}")
             else:
                 # Minimal read: holding register offset 0
-                client._get_client().read_holding_registers(0, count=1, device_id=unit_id)
+                rr = client._get_client().read_holding_registers(0, count=1, device_id=unit_id)
+                if rr.isError():
+                    raise ModbusIOError(str(rr), table="holding_register", offset=0)
                 typer.echo(f"OK: Connected to {host}:{port}")
     except InvalidTagError as e:
         typer.echo(f"Error: Invalid tag: {e}", err=True)
@@ -255,7 +224,7 @@ def info(
     setup_logging(verbose)
 
     info_data = {
-        "version": __version__ if hasattr(sys.modules[__name__], "__version__") else "unknown",
+        "version": __version__,
         "profile": profile,
     }
 
@@ -264,7 +233,9 @@ def info(
         try:
             client = create_client(host, port, unit_id, timeout, retries, profile)
             with client:
-                client._get_client().read_holding_registers(0, count=1, device_id=unit_id)
+                rr = client._get_client().read_holding_registers(0, count=1, device_id=unit_id)
+                if rr.isError():
+                    raise ModbusIOError(str(rr), table="holding_register", offset=0)
                 info_data["connectivity"] = {
                     "status": "connected",
                     "host": host,
@@ -413,11 +384,6 @@ def write(
 @app.command()
 def explain(
     tag: Annotated[str, typer.Argument(help="Tag to explain (e.g., d7, T2.PV)")],
-    host: HostOption = None,
-    port: PortOption = 502,
-    unit_id: UnitIdOption = 1,
-    timeout: TimeoutOption = 3.0,
-    retries: RetriesOption = 1,
     profile: ProfileOption = "fc6a",
     verbose: VerboseOption = False,
     json_output: JsonOption = False,
@@ -430,10 +396,30 @@ def explain(
     setup_logging(verbose)
 
     try:
-        client = create_client(host or "127.0.0.1", port, unit_id, timeout, retries, profile)
+        # Use tag map directly without creating a client
+        from .tagmap import get_default_tagmap
+        from .normalize import normalize_tag
+        from .types import ModbusTable
 
-        # explain() doesn't need connection
-        info = client.explain(tag)
+        tagmap = get_default_tagmap(profile)
+        normalized = normalize_tag(tag)
+        defn = tagmap.lookup(normalized)
+
+        # Build explain info
+        func = {
+            ModbusTable.COIL: "read_coils",
+            ModbusTable.DISCRETE_INPUT: "read_discrete_inputs",
+            ModbusTable.INPUT_REGISTER: "read_input_registers",
+            ModbusTable.HOLDING_REGISTER: "read_holding_registers",
+        }.get(defn.table, "unknown")
+
+        info = {
+            "normalized_tag": normalized,
+            "table": defn.table.value,
+            "offset": defn.offset,
+            "width": defn.width,
+            "function_used": func,
+        }
 
         if json_output:
             typer.echo(json.dumps(info, indent=2))
@@ -484,20 +470,37 @@ def read_many(
 
         with client:
             if partial:
-                # Partial mode: collect valid tags and errors separately
-                results: dict[str, Any] = {}
+                # Partial mode: validate tags first, then batch read valid ones
+                from .normalize import normalize_tag as norm_tag
+
+                valid_tags: list[str] = []
                 errors: dict[str, str] = {}
 
+                # Validate all tags first (no connection needed)
                 for tag in tags:
                     try:
-                        value = client.read(tag)
-                        if signed and isinstance(value, int):
-                            value = to_signed(value)
-                        results[tag] = value
+                        normalized = norm_tag(tag)
+                        client._tagmap.lookup(normalized)
+                        valid_tags.append(tag)
                     except (InvalidTagError, UnknownTagError) as e:
                         errors[tag] = str(e)
+
+                # Batch read all valid tags
+                results: dict[str, Any] = {}
+                if valid_tags:
+                    try:
+                        results = client.read_many(valid_tags)
+                        # Apply signed conversion if requested
+                        if signed:
+                            results = {
+                                tag: to_signed(val) if isinstance(val, int) else val
+                                for tag, val in results.items()
+                            }
                     except ModbusIOError as e:
-                        errors[tag] = f"Modbus error: {e}"
+                        # If batch read fails, mark all valid tags as errored
+                        for tag in valid_tags:
+                            errors[tag] = f"Modbus error: {e}"
+                        results = {}
 
                 output = {"values": results}
                 if errors:
@@ -564,6 +567,14 @@ def poll(
         typer.echo(f"Error: Invalid format '{format}'. Must be text, json, or csv.", err=True)
         raise typer.Exit(2)
 
+    if interval <= 0:
+        typer.echo(f"Error: Interval must be positive, got {interval}", err=True)
+        raise typer.Exit(2)
+
+    if not tags:
+        typer.echo("Error: At least one tag is required for poll", err=True)
+        raise typer.Exit(2)
+
     try:
         client = create_client(host, port, unit_id, timeout, retries, profile)
 
@@ -572,7 +583,6 @@ def poll(
             typer.echo("timestamp," + ",".join(tags))
 
         with client:
-            iteration = 0
             while True:
                 try:
                     # Read all tags
@@ -598,10 +608,8 @@ def poll(
                         }
                         typer.echo(json.dumps(output))
                     elif format == "csv":
-                        values = [str(results[tag]) for tag in tags]
+                        values = [format_value(results[tag], signed) for tag in tags]
                         typer.echo(timestamp + "," + ",".join(values))
-
-                    iteration += 1
 
                     # Exit after one iteration if --once
                     if once:
@@ -614,9 +622,6 @@ def poll(
                     # Retry logic: if we've exhausted retries, exit
                     typer.echo(f"Error: Connection/Modbus error: {e}", err=True)
                     raise typer.Exit(3)
-                except KeyboardInterrupt:
-                    typer.echo("\nStopped by user", err=True)
-                    raise typer.Exit(0)
 
     except InvalidTagError as e:
         typer.echo(f"Error: Invalid tag: {e}", err=True)
@@ -641,8 +646,7 @@ def poll(
 def version_callback(value: bool) -> None:
     """Show version and exit."""
     if value:
-        version = __version__ if hasattr(sys.modules[__name__], "__version__") else "unknown"
-        typer.echo(f"pyidec-modbus {version}")
+        typer.echo(f"pyidec-modbus {__version__}")
         raise typer.Exit(0)
 
 

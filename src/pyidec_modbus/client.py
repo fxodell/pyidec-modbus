@@ -89,7 +89,7 @@ class IDECModbusClient:
     def _read_one(self, defn: TagDef) -> bool | int:
         client = self._get_client()
         addr = defn.offset
-        count = max(1, defn.width if defn.width == 1 else 1)
+        count = 1  # one coil or one 16-bit register
         if defn.table == ModbusTable.COIL:
             rr = client.read_coils(addr, count=count, device_id=self._unit_id)
         elif defn.table == ModbusTable.DISCRETE_INPUT:
@@ -110,7 +110,23 @@ class IDECModbusClient:
                 cause=getattr(rr, "exception", None),
             )
         if defn.table in (ModbusTable.COIL, ModbusTable.DISCRETE_INPUT):
+            bits = getattr(rr, "bits", None)
+            if not bits or len(bits) < 1:
+                raise ModbusIOError(
+                    "Empty bit response",
+                    tag=defn.operand,
+                    table=defn.table.value,
+                    offset=addr,
+                )
             return bool(rr.bits[0])
+        registers = getattr(rr, "registers", None)
+        if not registers or len(registers) < 1:
+            raise ModbusIOError(
+                "Empty register response",
+                tag=defn.operand,
+                table=defn.table.value,
+                offset=addr,
+            )
         return int(rr.registers[0])
 
     def _write_one(self, defn: TagDef, value: bool | int) -> None:
@@ -192,6 +208,14 @@ class IDECModbusClient:
                         rr = client.read_coils(start, count=count, device_id=self._unit_id)
                         if rr.isError():
                             raise ModbusIOError(str(rr), tag=group[0][1], table=table.value, offset=start)
+                        bits = getattr(rr, "bits", None)
+                        if not bits or len(bits) < count:
+                            raise ModbusIOError(
+                                "Short bit response",
+                                tag=group[0][1],
+                                table=table.value,
+                                offset=start,
+                            )
                         for i, (_off, op) in enumerate(group):
                             val = bool(rr.bits[i])
                             for orig in operand_to_originals[op]:
@@ -200,6 +224,14 @@ class IDECModbusClient:
                         rr = client.read_discrete_inputs(start, count=count, device_id=self._unit_id)
                         if rr.isError():
                             raise ModbusIOError(str(rr), tag=group[0][1], table=table.value, offset=start)
+                        bits = getattr(rr, "bits", None)
+                        if not bits or len(bits) < count:
+                            raise ModbusIOError(
+                                "Short bit response",
+                                tag=group[0][1],
+                                table=table.value,
+                                offset=start,
+                            )
                         for i, (_off, op) in enumerate(group):
                             val = bool(rr.bits[i])
                             for orig in operand_to_originals[op]:
@@ -208,6 +240,14 @@ class IDECModbusClient:
                         rr = client.read_input_registers(start, count=count, device_id=self._unit_id)
                         if rr.isError():
                             raise ModbusIOError(str(rr), tag=group[0][1], table=table.value, offset=start)
+                        registers = getattr(rr, "registers", None)
+                        if not registers or len(registers) < count:
+                            raise ModbusIOError(
+                                "Short register response",
+                                tag=group[0][1],
+                                table=table.value,
+                                offset=start,
+                            )
                         for i, (_off, op) in enumerate(group):
                             val = int(rr.registers[i])
                             for orig in operand_to_originals[op]:
@@ -216,6 +256,14 @@ class IDECModbusClient:
                         rr = client.read_holding_registers(start, count=count, device_id=self._unit_id)
                         if rr.isError():
                             raise ModbusIOError(str(rr), tag=group[0][1], table=table.value, offset=start)
+                        registers = getattr(rr, "registers", None)
+                        if not registers or len(registers) < count:
+                            raise ModbusIOError(
+                                "Short register response",
+                                tag=group[0][1],
+                                table=table.value,
+                                offset=start,
+                            )
                         for i, (_off, op) in enumerate(group):
                             val = int(rr.registers[i])
                             for orig in operand_to_originals[op]:

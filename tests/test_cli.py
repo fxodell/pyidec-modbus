@@ -164,8 +164,10 @@ def test_ping_command_default(mock_client_class: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
     mock_client.__enter__.return_value = mock_client
+    # Minimal holding-register read succeeds
+    mock_client._get_client.return_value.read_holding_registers.return_value.isError.return_value = False
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "ping"])
+    result = runner.invoke(app, ["ping", "--host", "192.168.1.10"])
 
     assert result.exit_code == 0
     assert "OK: Connected to 192.168.1.10:502" in result.stdout
@@ -180,7 +182,7 @@ def test_ping_command_with_tag(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read.return_value = 1234
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "ping", "--tag", "D0007"])
+    result = runner.invoke(app, ["ping", "--host", "192.168.1.10", "--tag", "D0007"])
 
     assert result.exit_code == 0
     assert "read D0007 = 1234" in result.stdout
@@ -214,7 +216,7 @@ def test_read_command(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read.return_value = 1234
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "read", "D0007"])
+    result = runner.invoke(app, ["read", "D0007", "--host", "192.168.1.10"])
 
     assert result.exit_code == 0
     assert "1234" in result.stdout
@@ -229,7 +231,7 @@ def test_read_command_json(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read.return_value = 1234
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "read", "D0007", "--json"])
+    result = runner.invoke(app, ["read", "D0007", "--host", "192.168.1.10", "--json"])
 
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -245,7 +247,7 @@ def test_read_command_signed(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read.return_value = 65535
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "read", "D0007", "--signed"])
+    result = runner.invoke(app, ["read", "D0007", "--host", "192.168.1.10", "--signed"])
 
     assert result.exit_code == 0
     assert "-1" in result.stdout
@@ -258,7 +260,7 @@ def test_write_command_bool(mock_client_class: MagicMock) -> None:
     mock_client_class.return_value = mock_client
     mock_client.__enter__.return_value = mock_client
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "write", "Q0001", "true"])
+    result = runner.invoke(app, ["write", "Q0001", "true", "--host", "192.168.1.10"])
 
     assert result.exit_code == 0
     assert "OK: Wrote Q0001 = true" in result.stdout
@@ -272,7 +274,7 @@ def test_write_command_int(mock_client_class: MagicMock) -> None:
     mock_client_class.return_value = mock_client
     mock_client.__enter__.return_value = mock_client
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "write", "D0007", "1234"])
+    result = runner.invoke(app, ["write", "D0007", "1234", "--host", "192.168.1.10"])
 
     assert result.exit_code == 0
     assert "OK: Wrote D0007 = 1234" in result.stdout
@@ -286,32 +288,24 @@ def test_write_command_signed(mock_client_class: MagicMock) -> None:
     mock_client_class.return_value = mock_client
     mock_client.__enter__.return_value = mock_client
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "write", "D0007", "-100", "--signed"])
+    # Use -- so -100 is not parsed as an option
+    result = runner.invoke(app, ["write", "--host", "192.168.1.10", "--signed", "D0007", "--", "-100"])
 
     assert result.exit_code == 0
     # -100 signed = 65436 unsigned
     mock_client.write.assert_called_once_with("D0007", 65436)
 
 
-@patch("pyidec_modbus.cli.IDECModbusClient")
-def test_explain_command(mock_client_class: MagicMock) -> None:
-    """Test explain command."""
-    mock_client = MagicMock()
-    mock_client_class.return_value = mock_client
-    mock_client.explain.return_value = {
-        "normalized_tag": "D0007",
-        "table": "holding_register",
-        "offset": 6,
-        "width": 16,
-        "function_used": "read_holding_registers",
-    }
-
+def test_explain_command() -> None:
+    """Test explain command (no mocking needed - uses tagmap directly)."""
     result = runner.invoke(app, ["explain", "d7"])
 
     assert result.exit_code == 0
     assert "D0007" in result.stdout
     assert "holding_register" in result.stdout
-    mock_client.explain.assert_called_once_with("d7")
+    assert "Normalized tag:" in result.stdout
+    assert "Modbus table:" in result.stdout
+    assert "Offset:" in result.stdout
 
 
 @patch("pyidec_modbus.cli.IDECModbusClient")
@@ -322,7 +316,7 @@ def test_read_many_command(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read_many.return_value = {"D0007": 1234, "M0012": True}
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "read-many", "D0007", "M0012"])
+    result = runner.invoke(app, ["read-many", "D0007", "M0012", "--host", "192.168.1.10"])
 
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -339,7 +333,7 @@ def test_poll_command_once(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read_many.return_value = {"D0007": 1234}
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "poll", "D0007", "--once"])
+    result = runner.invoke(app, ["poll", "D0007", "--host", "192.168.1.10", "--once"])
 
     assert result.exit_code == 0
     assert "D0007=1234" in result.stdout
@@ -354,7 +348,7 @@ def test_poll_command_json_once(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read_many.return_value = {"D0007": 1234}
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "poll", "D0007", "--once", "--format", "json"])
+    result = runner.invoke(app, ["poll", "D0007", "--host", "192.168.1.10", "--once", "--format", "json"])
 
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -371,14 +365,14 @@ def test_poll_command_csv_once(mock_client_class: MagicMock) -> None:
     mock_client.__enter__.return_value = mock_client
     mock_client.read_many.return_value = {"D0007": 1234, "M0012": True}
 
-    result = runner.invoke(app, ["--host", "192.168.1.10", "poll", "D0007", "M0012", "--once", "--format", "csv"])
+    result = runner.invoke(app, ["poll", "D0007", "M0012", "--host", "192.168.1.10", "--once", "--format", "csv"])
 
     assert result.exit_code == 0
     lines = result.stdout.strip().split("\n")
     assert len(lines) == 2  # header + data
     assert lines[0] == "timestamp,D0007,M0012"
     assert "1234" in lines[1]
-    assert "True" in lines[1]
+    assert "true" in lines[1]  # lowercase bool (consistent with format_value)
 
 
 def test_command_help() -> None:
@@ -399,3 +393,56 @@ def test_version_flag() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert "pyidec-modbus" in result.stdout
+
+
+def test_poll_invalid_interval() -> None:
+    """Test poll command with invalid interval."""
+    result = runner.invoke(app, ["poll", "D0007", "--host", "192.168.1.10", "--interval", "0"])
+    assert result.exit_code == 2
+    assert "Interval must be positive" in (result.stderr or result.stdout or "")
+
+
+def test_poll_negative_interval() -> None:
+    """Test poll command with negative interval."""
+    result = runner.invoke(app, ["poll", "D0007", "--host", "192.168.1.10", "--interval", "-1.0"])
+    assert result.exit_code == 2
+    assert "Interval must be positive" in (result.stderr or result.stdout or "")
+
+
+def test_poll_invalid_format() -> None:
+    """Test poll command with invalid format."""
+    result = runner.invoke(app, ["poll", "D0007", "--host", "192.168.1.10", "--format", "xml"])
+    assert result.exit_code == 2
+    assert "Invalid format" in (result.stderr or result.stdout or "")
+
+
+def test_poll_empty_tags() -> None:
+    """Test poll command with no tags fails (Typer requires TAGS or we validate empty list)."""
+    result = runner.invoke(app, ["poll", "--host", "192.168.1.10"])
+    assert result.exit_code == 2
+    out = result.stderr or result.stdout or ""
+    assert "At least one tag" in out or "TAGS" in out or "Usage" in out
+
+
+@patch("pyidec_modbus.tagmap.get_default_tagmap")
+def test_explain_command_json(mock_tagmap: MagicMock) -> None:
+    """Test explain command with JSON output."""
+    from pyidec_modbus.types import TagDef, ModbusTable
+
+    mock_map = MagicMock()
+    mock_map.lookup.return_value = TagDef(
+        operand="D0007",
+        table=ModbusTable.HOLDING_REGISTER,
+        offset=6,
+        width=16,
+    )
+    mock_tagmap.return_value = mock_map
+
+    result = runner.invoke(app, ["explain", "D0007", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["normalized_tag"] == "D0007"
+    assert data["table"] == "holding_register"
+    assert data["offset"] == 6
+    assert data["width"] == 16
