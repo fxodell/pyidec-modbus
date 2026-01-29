@@ -62,6 +62,10 @@ SignedOption = Annotated[
     bool,
     typer.Option("--signed", help="Interpret register values as signed 16-bit integers"),
 ]
+FloatOption = Annotated[
+    bool,
+    typer.Option("--float", help="Read as 32-bit IEEE 754 float (two consecutive registers)"),
+]
 
 
 def setup_logging(verbose: bool) -> None:
@@ -282,12 +286,14 @@ def read(
     verbose: VerboseOption = False,
     json_output: JsonOption = False,
     signed: SignedOption = False,
+    as_float: FloatOption = False,
 ) -> None:
     """
     Read a single tag from the PLC.
 
     Returns the value as text by default, or JSON with --json.
     Use --signed to interpret register values as signed 16-bit integers.
+    Use --float to read two consecutive holding registers as IEEE 754 float (e.g. D1000 = D1000,D1001).
     """
     setup_logging(verbose)
 
@@ -295,16 +301,17 @@ def read(
         client = create_client(host, port, unit_id, timeout, retries, profile)
 
         with client:
-            value = client.read(tag)
-
-            # Apply signed conversion if requested and value is int
-            if signed and isinstance(value, int):
-                value = to_signed(value)
+            if as_float:
+                value = client.read_float(tag)
+            else:
+                value = client.read(tag)
+                if signed and isinstance(value, int):
+                    value = to_signed(value)
 
             if json_output:
                 typer.echo(json.dumps({"tag": tag, "value": value}))
             else:
-                typer.echo(format_value(value, signed))
+                typer.echo(format_value(value, signed) if not as_float else str(value))
     except InvalidTagError as e:
         typer.echo(f"Error: Invalid tag: {e}", err=True)
         raise typer.Exit(2)

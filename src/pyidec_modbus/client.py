@@ -1,6 +1,7 @@
 """IDECModbusClient: high-level wrapper over pymodbus with tag-name API and block coalescing."""
 
 import logging
+import struct
 import time
 from collections import defaultdict
 from typing import Any, Iterator
@@ -128,6 +129,47 @@ class IDECModbusClient:
                 offset=addr,
             )
         return int(rr.registers[0])
+
+    def read_float(self, tag: str, word_order: str = "high_first") -> float:
+        """
+        Read a 32-bit IEEE 754 float from two consecutive holding registers.
+
+        Uses the tag's offset as the start address; reads offset and offset+1.
+        word_order: "high_first" (IDEC FC6A default) = [high, low], "low_first" (Modicon) = [low, high].
+        """
+        defn = self._resolve(tag)
+        if defn.table != ModbusTable.HOLDING_REGISTER:
+            raise ModbusIOError(
+                f"Float read only for holding registers, got {defn.table.value}",
+                tag=defn.operand,
+                table=defn.table.value,
+                offset=defn.offset,
+            )
+        client = self._get_client()
+        addr = defn.offset
+        rr = client.read_holding_registers(addr, count=2, device_id=self._unit_id)
+        if rr.isError():
+            raise ModbusIOError(
+                str(rr),
+                tag=defn.operand,
+                table=defn.table.value,
+                offset=addr,
+                cause=getattr(rr, "exception", None),
+            )
+        regs = getattr(rr, "registers", None)
+        if not regs or len(regs) < 2:
+            raise ModbusIOError(
+                "Short register response for float",
+                tag=defn.operand,
+                table=defn.table.value,
+                offset=addr,
+            )
+        if word_order == "low_first":
+            hi, lo = regs[1], regs[0]
+        else:
+            hi, lo = regs[0], regs[1]
+        buf = struct.pack(">HH", hi, lo)
+        return struct.unpack(">f", buf)[0]
 
     def _write_one(self, defn: TagDef, value: bool | int) -> None:
         client = self._get_client()
