@@ -5,7 +5,7 @@
 
 ## Overview
 
-Production-ready Python package (3.11+) that wraps pymodbus for IDEC FC6A PLC communication using native tag names instead of raw Modbus addresses.
+Production-ready Python package (3.10+) that wraps pymodbus for IDEC FC6A PLC communication using native tag names instead of raw Modbus addresses.
 
 ## What Was Delivered
 
@@ -79,7 +79,7 @@ Fixed 9 issues across 3 categories:
 - **3-layer design**: Normalization → Tag Map → Client
 - **Block coalescing**: Groups contiguous Modbus reads for efficiency
 - **Embedded tag map**: No runtime dependency on Excel files
-- **Type safety**: Full type hints (Python 3.11+)
+- **Type safety**: Full type hints (Python 3.10+)
 
 ### Key Optimizations
 1. **Block Coalescing**: `read_many()` groups tags by table and coalesces contiguous offsets

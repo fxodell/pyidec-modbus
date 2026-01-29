@@ -4,7 +4,7 @@ Production-ready Python package that wraps [pymodbus](https://github.com/pymodbu
 
 - **No runtime dependency on spreadsheets or XML.** The FC6A tag map is embedded in the package as a JSON resource and loaded via `importlib.resources`.
 - **Default profile: FC6A.** Other profiles (e.g. FC5A) can be added later without breaking the API.
-- **Python 3.11+**, full type hints, clear exceptions (`InvalidTagError`, `UnknownTagError`, `ModbusIOError`).
+- **Python 3.10+**, full type hints, clear exceptions (`InvalidTagError`, `UnknownTagError`, `ModbusIOError`).
 
 ## Installation
 

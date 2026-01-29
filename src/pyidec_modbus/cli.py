@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Production-ready CLI for pyidec-modbus using Typer."""
 
+import csv
 import json
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import typer
@@ -137,6 +139,40 @@ def format_value(value: bool | int, signed: bool = False) -> str:
         # Convert from unsigned to signed if needed
         if value > 32767:
             return str(value - 65536)
+    return str(value)
+
+
+def load_tag_map(csv_path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Load tag name -> register and register -> tag name from a CSV with columns
+    (register, tag, ...). Returns (tag_to_register, register_to_tag). Only rows
+    with non-empty tag are included.
+    """
+    tag_to_register: dict[str, str] = {}
+    register_to_tag: dict[str, str] = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            reg = (row[0] or "").strip()
+            tag = (row[1] or "").strip()
+            if not reg or not tag:
+                continue
+            if tag not in tag_to_register:
+                tag_to_register[tag] = reg
+            register_to_tag[reg] = tag
+    return tag_to_register, register_to_tag
+
+
+def format_poll_value(value: bool | int | float, signed: bool = False) -> str:
+    """Format value for poll output: numbers with 2 decimal places."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        if signed and isinstance(value, int) and value > 32767:
+            value = value - 65536
+        return f"{value:.2f}"
     return str(value)
 
 
@@ -311,7 +347,7 @@ def read(
             if json_output:
                 typer.echo(json.dumps({"tag": tag, "value": value}))
             else:
-                typer.echo(format_value(value, signed) if not as_float else str(value))
+                typer.echo(format_value(value, signed) if not as_float else f"{value:.2f}")
     except InvalidTagError as e:
         typer.echo(f"Error: Invalid tag: {e}", err=True)
         raise typer.Exit(2)
@@ -544,7 +580,7 @@ def read_many(
 
 @app.command()
 def poll(
-    tags: Annotated[list[str], typer.Argument(help="Tags to poll (space-separated)")],
+    tags: Annotated[list[str], typer.Argument(help="Tags to poll: register names (D0007, M0012) and/or tag names (FC_001) when --tag-map is set")],
     host: HostOption = None,
     port: PortOption = 502,
     unit_id: UnitIdOption = 1,
@@ -556,14 +592,22 @@ def poll(
     interval: Annotated[float, typer.Option("--interval", "-i", help="Polling interval in seconds")] = 1.0,
     once: Annotated[bool, typer.Option("--once", help="Poll once and exit")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: text, json, csv")] = "text",
+    tag_map: Annotated[
+        Optional[str],
+        typer.Option("--tag-map", envvar="PYIDEC_TAG_MAP", help="CSV path (register,tag,...): poll by tag name or register; can mix (e.g. FC_001 D0007)"),
+    ] = None,
 ) -> None:
     """
     Continuously poll tags at specified interval.
 
+    You can poll by register name (D0007, M0012) or by tag name (FC_001, LIT_001_Raw).
+    With --tag-map (or PYIDEC_TAG_MAP): pass either tag names or register names; you can mix
+    (e.g. pyidec poll FC_001 D0007 M0012 --tag-map data/test.csv). Without --tag-map: pass only register names.
+
     Outputs format:
-    - text: timestamp + tag=value pairs (default)
+    - text: timestamp + name=value pairs (default)
     - json: NDJSON with {"timestamp": "...", "values": {...}} per line
-    - csv: Tags as columns, one row per poll cycle
+    - csv: Names as columns, one row per poll cycle
 
     Use --once to poll once and exit.
     Press Ctrl+C to stop gracefully.
@@ -582,40 +626,65 @@ def poll(
         typer.echo("Error: At least one tag is required for poll", err=True)
         raise typer.Exit(2)
 
+    # Resolve tag names to registers and build display names (can mix tag names and register names)
+    tag_map_path: Path | None = Path(tag_map) if tag_map else None
+    tag_to_register: dict[str, str] = {}
+    register_to_tag: dict[str, str] = {}
+    if tag_map_path is not None:
+        if not tag_map_path.is_file():
+            typer.echo(f"Error: Tag map file not found: {tag_map_path}", err=True)
+            raise typer.Exit(2)
+        tag_to_register, register_to_tag = load_tag_map(tag_map_path)
+
+    display_names: list[str] = []
+    registers_to_poll: list[str] = []
+    for arg in tags:
+        if arg in tag_to_register:
+            reg = tag_to_register[arg]
+            registers_to_poll.append(reg)
+            display_names.append(arg)
+        else:
+            registers_to_poll.append(arg)
+            display_names.append(register_to_tag.get(arg, arg))
+
     try:
         client = create_client(host, port, unit_id, timeout, retries, profile)
 
-        # CSV header
+        # CSV header uses display names
         if format == "csv":
-            typer.echo("timestamp," + ",".join(tags))
+            typer.echo("timestamp," + ",".join(display_names))
 
         with client:
             while True:
                 try:
-                    # Read all tags
-                    results = client.read_many(tags)
+                    # Read all by register
+                    results = client.read_many(registers_to_poll)
 
                     # Apply signed conversion if requested
                     if signed:
                         results = {
-                            tag: to_signed(val) if isinstance(val, int) else val
-                            for tag, val in results.items()
+                            reg: to_signed(val) if isinstance(val, int) else val
+                            for reg, val in results.items()
                         }
 
-                    # Format output
+                    # Format output (2 decimal places); key by display name for output
                     timestamp = datetime.now(timezone.utc).isoformat()
+                    formatted_by_display = {
+                        display_names[i]: format_poll_value(results[reg], signed)
+                        for i, reg in enumerate(registers_to_poll)
+                    }
 
                     if format == "text":
-                        tag_pairs = " ".join(f"{tag}={format_value(results[tag], signed)}" for tag in tags)
+                        tag_pairs = " ".join(f"{name}={formatted_by_display[name]}" for name in display_names)
                         typer.echo(f"{timestamp} {tag_pairs}")
                     elif format == "json":
                         output = {
                             "timestamp": timestamp,
-                            "values": results,
+                            "values": formatted_by_display,
                         }
                         typer.echo(json.dumps(output))
                     elif format == "csv":
-                        values = [format_value(results[tag], signed) for tag in tags]
+                        values = [formatted_by_display[name] for name in display_names]
                         typer.echo(timestamp + "," + ",".join(values))
 
                     # Exit after one iteration if --once
