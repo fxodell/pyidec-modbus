@@ -103,6 +103,9 @@ pyidec read-many D0007 D0008 M0012 --partial
 # Poll tags continuously (text, json, or csv)
 pyidec poll D0007 M0012 --interval 1.0 --format json
 
+# Poll by tag name using a CSV tag map (register,tag,...)
+pyidec poll FC_001 LIT_001_Raw --tag-map data/test.csv --once
+
 # Explain tag mapping (no connection required)
 pyidec explain D0007
 ```
@@ -110,7 +113,7 @@ pyidec explain D0007
 ### Features
 
 - **7 commands**: `ping`, `info`, `read`, `write`, `explain`, `read-many`, `poll`
-- **Environment variables**: `PYIDEC_HOST`, `PYIDEC_PORT`, `PYIDEC_UNIT_ID`, `PYIDEC_TIMEOUT`, `PYIDEC_RETRIES`, `PYIDEC_PROFILE`
+- **Environment variables**: `PYIDEC_HOST`, `PYIDEC_PORT`, `PYIDEC_UNIT_ID`, `PYIDEC_TIMEOUT`, `PYIDEC_RETRIES`, `PYIDEC_PROFILE`, `PYIDEC_TAG_MAP`
 - **Output formats**: Text (default), JSON, CSV (for poll)
 - **Signed integer support**: `--signed` flag for register interpretation
 - **Partial results**: `--partial` flag for batch reads with error handling
