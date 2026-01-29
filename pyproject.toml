@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyidec-modbus"
-version = "0.1.0"
+version = "0.1.1"
 description = "Production-ready Python package wrapping pymodbus for IDEC FC6A operands by native tag names."
 readme = "README.md"
 requires-python = ">=3.10"

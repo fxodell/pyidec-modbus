@@ -9,6 +9,18 @@ Production-ready Python package that wraps [pymodbus](https://github.com/pymodbu
 ## Installation
 
 ```bash
+pip install pyidec-modbus
+
+# With CLI support:
+pip install "pyidec-modbus[cli]"
+
+# With dev tools:
+pip install "pyidec-modbus[dev]"
+
+# All extras:
+pip install "pyidec-modbus[cli,dev]"
+
+# Editable install (from source):
 pip install -e .
 
 # With CLI support:

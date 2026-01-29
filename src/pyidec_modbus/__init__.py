@@ -1,6 +1,6 @@
 """pyidec-modbus: IDEC operand read/write via pymodbus using native tag names."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .client import IDECModbusClient
 from .errors import InvalidTagError, ModbusIOError, PyIDECModbusError, UnknownTagError
