@@ -1,6 +1,6 @@
 # pyidec-modbus
 
-Production-ready Python package that wraps [pymodbus](https://github.com/pymodbus-dev/pymodbus) and lets you read/write IDEC FC6A operands (D, M, I, Q, R, T, C, etc.) by **native tag names** — not raw Modbus addresses.
+Production-ready Python package that wraps [pymodbus](https://github.com/pymodbus-dev/pymodbus) and lets you read/write IDEC FC6A operands (D, M, I, Q, T, C) by **native tag names** — not raw Modbus addresses.
 
 - **No runtime dependency on spreadsheets or XML.** The FC6A tag map is embedded in the package as a JSON resource and loaded via `importlib.resources`.
 - **Default profile: FC6A.** Other profiles (e.g. FC5A) can be added later without breaking the API.
@@ -61,12 +61,13 @@ To **regenerate** the embedded map from the official IDEC spreadsheet (build-tim
 2. Install dev extra: `pip install -e ".[dev]"`
 3. Run: `python tools/generate_map_fc6a.py [path/to/file.xlsx]`
 
-Output is written to `src/pyidec_modbus/data/fc6a_tagmap.json`. The generator is not required at runtime.
+Output is written to `src/pyidec_modbus/data/fc6a_tagmap.json`. If the Excel file is in strict OOXML format and the script fails, use `tools/parse_xlsx_strict.py` to parse it and generate the JSON. The generator is not required at runtime.
 
 ## API summary
 
 - `IDECModbusClient(host, port=502, unit_id=1, profile="fc6a", map_override=None, timeout=3.0, retries=3)`
-- `read(tag: str) -> bool | int`
+- `read(tag: str) -> bool | int` — single tag (bool for coils/discrete, int for registers)
+- `read_float(tag: str, word_order="high_first") -> float` — 32-bit IEEE 754 float from two consecutive holding registers (e.g. D registers)
 - `write(tag: str, value: bool | int) -> None`
 - `read_many(tags: list[str]) -> dict[str, bool | int]` — groups by table, coalesces contiguous reads
 - `explain(tag: str) -> dict` — normalized tag, table, offset, function used
